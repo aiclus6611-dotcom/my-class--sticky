@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>互動便利貼白板</title>
+    <title>結構化互動白板</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
@@ -11,28 +11,50 @@
     <style>
         body { font-family: "微軟正黑體", sans-serif; background-color: #333; margin: 0; padding: 0; overflow: hidden; }
         
-        /* 通用按鈕 */
-        .btn { padding: 8px 16px; border-radius: 4px; border: none; cursor: pointer; font-size: 1rem; margin: 5px; }
+        /* --- 通用元件 --- */
+        .btn { padding: 8px 16px; border-radius: 4px; border: none; cursor: pointer; font-size: 1rem; margin: 5px; transition: 0.2s; white-space: nowrap;}
+        .btn:hover { opacity: 0.9; transform: translateY(-1px); }
         .btn-primary { background: #1976d2; color: white; }
+        .btn-success { background: #4caf50; color: white; }
         .btn-danger { background: #d32f2f; color: white; }
-        .btn-upload { background: #4caf50; color: white; display: inline-block; cursor: pointer; }
+        .btn-secondary { background: #757575; color: white; }
+        .btn-upload { background: #ff9800; color: white; display: inline-block; cursor: pointer; }
+        .btn-icon { background: transparent; color: #ccc; font-size: 1.2rem; padding: 5px 10px; }
+        .btn-icon:hover { color: white; background: rgba(255,255,255,0.1); }
         
+        input, select { padding: 10px; border-radius: 4px; border: 1px solid #ccc; font-size: 1rem; box-sizing: border-box; }
+
         /* --- 學員端樣式 --- */
+        .student-wrapper {
+            background-color: #f0f2f5; height: 100vh; overflow-y: auto; padding: 20px; box-sizing: border-box;
+        }
         .student-container { 
-            max-width: 600px; margin: 50px auto; background: #f0f2f5; 
-            padding: 30px; border-radius: 15px; min-height: 80vh;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            max-width: 600px; margin: 0 auto; padding-bottom: 50px;
         }
-        .input-area { display: flex; gap: 10px; margin-bottom: 20px; }
-        .input-box { flex: 1; padding: 15px; font-size: 1.1rem; border: 2px solid #ddd; border-radius: 8px; outline: none; }
-        .input-box:focus { border-color: #1976d2; }
-        .my-list h3 { border-bottom: 2px solid #ddd; padding-bottom: 10px; color: #555; }
+        .zone-card {
+            background: white; padding: 20px; border-radius: 12px; 
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 20px;
+            border-left: 6px solid #1976d2; 
+        }
+        .zone-card h3 { margin: 0 0 10px 0; color: #333; display: flex; justify-content: space-between; align-items: center; }
+        .zone-hint { font-size: 0.85rem; color: #888; font-weight: normal; }
+        .input-row { display: flex; gap: 10px; }
+        .input-row input { flex: 1; }
+        .zone-card:nth-child(4n+1) { border-left-color: #fbc02d; }
+        .zone-card:nth-child(4n+2) { border-left-color: #42a5f5; }
+        .zone-card:nth-child(4n+3) { border-left-color: #66bb6a; }
+        .zone-card:nth-child(4n+4) { border-left-color: #ef5350; }
+
+        .my-list-section { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
         .my-item { 
-            background: #fff; padding: 15px; margin-bottom: 10px; border-radius: 8px; 
-            border-left: 5px solid #ffeb3b; box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-            display: flex; justify-content: space-between; align-items: center;
+            background: #fafafa; padding: 15px; margin-bottom: 10px; border-radius: 8px; 
+            border: 1px solid #eee; display: flex; justify-content: space-between; align-items: center;
         }
-        .waiting-text { text-align: center; color: #777; margin-top: 50px; font-style: italic; }
+        .note-tag {
+            display: inline-block; background: #e3f2fd; color: #1565c0;
+            font-size: 0.8rem; padding: 2px 8px; border-radius: 4px; 
+            margin-bottom: 4px; font-weight: bold; margin-right: 5px;
+        }
 
         /* --- 講師端樣式 (白板) --- */
         .teacher-board { 
@@ -42,44 +64,78 @@
             background-repeat: no-repeat;
             background-position: center;
         }
-        .toolbar {
-            position: fixed; top: 10px; left: 10px; right: 10px;
-            background: rgba(255,255,255,0.9); padding: 10px; border-radius: 8px;
-            z-index: 1000; display: flex; justify-content: space-between; align-items: center;
+
+        /* 改進後的講師控制台 */
+        /* 1. 觸發按鈕 (預設顯示) */
+        .toolbar-trigger {
+            position: fixed; bottom: 20px; right: 20px;
+            width: 50px; height: 50px; border-radius: 50%;
+            background: rgba(0,0,0,0.4); color: white;
+            display: flex; justify-content: center; align-items: center;
+            font-size: 1.5rem; cursor: pointer; z-index: 2000;
+            transition: 0.3s;
             box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+        .toolbar-trigger:hover { background: rgba(0,0,0,0.8); transform: scale(1.1); }
+
+        /* 2. 控制台本體 (展開時) */
+        .toolbar {
+            position: fixed; bottom: 0; left: 0; right: 0;
+            background: rgba(0, 0, 0, 0.9); 
+            padding: 15px 20px; 
+            z-index: 2001; 
+            display: flex; justify-content: space-between; align-items: center;
+            color: white;
+            animation: slideUp 0.3s ease-out;
+            box-shadow: 0 -2px 10px rgba(0,0,0,0.3);
+        }
+        
+        @keyframes slideUp {
+            from { transform: translateY(100%); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
         }
 
         /* 便利貼樣式 */
         .sticky-note {
-            position: absolute;
-            width: 180px;
-            min-height: 100px;
-            background: #ffeb3b; /* 經典便利貼黃 */
-            padding: 15px;
-            box-shadow: 2px 2px 10px rgba(0,0,0,0.2);
-            font-size: 1.1rem;
-            line-height: 1.4;
-            cursor: grab;
-            transform: rotate(-1deg); /* 稍微歪一點比較像便利貼 */
+            position: absolute; width: 180px; min-height: 100px;
+            background: #ffeb3b; padding: 15px;
+            box-shadow: 2px 5px 15px rgba(0,0,0,0.3);
+            font-size: 1.1rem; line-height: 1.4;
+            cursor: grab; transform: rotate(-1deg);
             transition: box-shadow 0.2s, transform 0.1s;
-            user-select: none; /* 避免拖曳時選取文字 */
-            border-radius: 2px 2px 15px 2px; /* 右下角捲起效果 */
-            word-wrap: break-word;
+            border-radius: 2px 2px 15px 2px; word-wrap: break-word; z-index: 100;
         }
-        .sticky-note:active { cursor: grabbing; box-shadow: 5px 10px 20px rgba(0,0,0,0.3); transform: scale(1.05); z-index: 999; }
+        .sticky-note:active { cursor: grabbing; transform: scale(1.05); z-index: 999; }
+        .sticky-tag {
+            display: inline-block; background: rgba(0,0,0,0.1); 
+            font-size: 0.8rem; padding: 2px 6px; border-radius: 4px; 
+            margin-bottom: 5px; color: #444; font-weight: bold;
+        }
         .note-close { 
-            position: absolute; top: -8px; right: -8px; width: 24px; height: 24px; 
+            position: absolute; top: -10px; right: -10px; width: 24px; height: 24px; 
             background: red; color: white; border-radius: 50%; text-align: center; 
-            line-height: 22px; cursor: pointer; font-size: 14px; display: none;
+            line-height: 22px; cursor: pointer; font-size: 14px; display: none; z-index: 101;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
         }
         .sticky-note:hover .note-close { display: block; }
+        .color-1 { background: #fff9c4; } 
+        .color-2 { background: #b3e5fc; } 
+        .color-3 { background: #c8e6c9; } 
+        .color-4 { background: #ffcdd2; } 
 
-        /* 顏色變化 */
-        .color-1 { background: #ffeb3b; } /* 黃 */
-        .color-2 { background: #81d4fa; } /* 藍 */
-        .color-3 { background: #a5d6a7; } /* 綠 */
-        .color-4 { background: #ef9a9a; } /* 紅 */
-
+        /* Modal */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.6); z-index: 3000;
+            display: flex; justify-content: center; align-items: center;
+        }
+        .modal-box {
+            background: white; padding: 25px; border-radius: 10px; width: 500px; max-width: 90%;
+            max-height: 80vh; overflow-y: auto;
+        }
+        .zone-row { display: flex; gap: 10px; margin-bottom: 10px; align-items: center; }
+        .zone-row input { flex: 1; }
+        .edit-modal { background: white; padding: 20px; border-radius: 10px; width: 90%; max-width: 400px; }
     </style>
 </head>
 <body>
@@ -90,20 +146,6 @@
 
         <div v-if="isTeacher" class="teacher-board" :style="{ backgroundImage: 'url(' + bgImage + ')' }">
             
-            <div class="toolbar">
-                <div>
-                    <strong>講師控制台</strong> | 
-                    便利貼數量: {{ notes.length }}
-                </div>
-                <div>
-                    <label class="btn btn-upload">
-                        更換背景圖
-                        <input type="file" accept="image/*" style="display: none;" @change="handleBgUpload">
-                    </label>
-                    <button class="btn btn-danger" @click="clearBoard">清空畫布</button>
-                </div>
-            </div>
-
             <div v-for="note in notes" 
                  :key="note.key"
                  class="sticky-note"
@@ -111,49 +153,151 @@
                  :style="{ left: note.x + 'px', top: note.y + 'px' }"
                  @mousedown="startDrag($event, note)"
             >
+                <div v-if="note.zoneName" class="sticky-tag">{{ note.zoneName }}</div>
                 {{ note.text }}
                 <div class="note-close" @click.stop="deleteNote(note.key)">✕</div>
             </div>
 
-        </div>
-
-        <div v-else class="student-container">
-            <h2 style="text-align: center; color: #333;">💡 想法提供區</h2>
-            <p style="text-align: center; color: #666; margin-bottom: 30px;">
-                請輸入您的想法，送出後講師會即時收到。<br>
-                <small>(您只會看到自己的紀錄，不會受他人影響)</small>
-            </p>
-
-            <div class="input-area">
-                <input 
-                    type="text" 
-                    class="input-box" 
-                    v-model="inputText" 
-                    placeholder="輸入您的論點或答案..." 
-                    @keydown.enter="sendNote"
-                >
-                <button class="btn btn-primary" @click="sendNote">送出</button>
+            <div v-if="showToolbar" class="toolbar">
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <strong style="font-size:1.1rem;">講師控制台</strong>
+                    <span style="color:#bbb; font-size:0.9rem;">(便利貼: {{ notes.length }})</span>
+                </div>
+                
+                <div style="display:flex; align-items:center; gap: 5px;">
+                    <button class="btn btn-primary" @click="showZoneModal = true">⚙️ 設定分區</button>
+                    <label class="btn btn-upload">
+                        🖼️ 背景
+                        <input type="file" accept="image/*" style="display: none;" @change="handleBgUpload">
+                    </label>
+                    <button class="btn btn-danger" @click="clearBoard">🗑️ 清空</button>
+                    
+                    <div style="width:1px; height:25px; background:#555; margin:0 10px;"></div>
+                    
+                    <button class="btn btn-icon" @click="showToolbar = false" title="隱藏控制台">▼ 收起</button>
+                </div>
             </div>
 
-            <div class="my-list">
-                <h3>我的紀錄</h3>
-                <div v-if="myNotes.length > 0">
-                    <div v-for="note in myNotes" :key="note.key" class="my-item">
-                        <span>{{ note.text }}</span>
-                        <small style="color:#999">已傳送</small>
+            <div v-else class="toolbar-trigger" @click="showToolbar = true" title="開啟講師控制台">
+                ⚙️
+            </div>
+
+        </div>
+
+        <div v-else class="student-wrapper">
+            <div class="student-container">
+                <h2 style="text-align: center; color: #333; margin-top:0; margin-bottom: 20px;">
+                    📝 請針對以下項目提供回應
+                </h2>
+
+                <div v-if="zones.length > 0">
+                    <div v-for="(z, idx) in zones" :key="idx" class="zone-card">
+                        <h3>
+                            {{ z.name }}
+                            <span class="zone-hint">({{ getLocationLabel(z.pos) }})</span>
+                        </h3>
+                        <div class="input-row">
+                            <input 
+                                type="text" 
+                                v-model="z.draftText" 
+                                :placeholder="'輸入「' + z.name + '」的想法...'"
+                                @keydown.enter="sendZoneNote(z)"
+                            >
+                            <button class="btn btn-primary" @click="sendZoneNote(z)">送出</button>
+                        </div>
                     </div>
                 </div>
-                <div v-else class="waiting-text">
-                    尚無內容，請開始輸入...
+
+                <div v-else class="zone-card" style="border-left-color: #999;">
+                    <h3>自由發言區</h3>
+                    <div class="input-row">
+                        <input 
+                            type="text" 
+                            v-model="freeText" 
+                            placeholder="請輸入您的想法..."
+                            @keydown.enter="sendFreeNote"
+                        >
+                        <button class="btn btn-primary" @click="sendFreeNote">送出</button>
+                    </div>
+                </div>
+
+                <hr style="margin: 30px 0; border: 0; border-top: 1px dashed #ccc;">
+
+                <div class="my-list-section">
+                    <h3 style="color:#555; margin-top:0;">我的紀錄 ({{ myNotes.length }})</h3>
+                    <div v-if="myNotes.length > 0">
+                        <div v-for="note in myNotes" :key="note.key" class="my-item">
+                            <div style="flex:1; padding-right:10px;">
+                                <div>
+                                    <span v-if="note.zoneName" class="note-tag">{{ note.zoneName }}</span>
+                                    <span style="font-size:1.1rem; color:#333;">{{ note.text }}</span>
+                                </div>
+                                <div style="font-size:0.8rem; color:#999; margin-top:5px;">
+                                    {{ new Date(note.timestamp).toLocaleTimeString() }}
+                                </div>
+                            </div>
+                            <div style="white-space:nowrap;">
+                                <button class="btn btn-secondary" @click="openEditModal(note)">修改</button>
+                                <button class="btn btn-danger" @click="deleteNote(note.key)">刪除</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div v-else style="text-align:center; color:#999; font-style:italic; padding:20px;">
+                        尚無內容...
+                    </div>
                 </div>
             </div>
         </div>
+
+        <div v-if="showZoneModal" class="modal-overlay">
+            <div class="modal-box">
+                <h3>分區與落點設定</h3>
+                <p style="color:#666; font-size:0.9rem;">設定分類名稱，並指定學員送出後便利貼會自動飛到的位置。</p>
+                
+                <div v-for="(z, idx) in tempZones" :key="idx" class="zone-row">
+                    <input type="text" v-model="z.name" placeholder="分類名稱 (例: 知識)">
+                    <select v-model="z.pos">
+                        <option value="TL">↖ 左上</option>
+                        <option value="TR">↗ 右上</option>
+                        <option value="BL">↙ 左下</option>
+                        <option value="BR">↘ 右下</option>
+                        <option value="T">↑ 上方</option>
+                        <option value="B">↓ 下方</option>
+                        <option value="L">← 左側</option>
+                        <option value="R">→ 右側</option>
+                        <option value="C">● 中間</option>
+                    </select>
+                    <button class="btn btn-danger" @click="removeTempZone(idx)">✕</button>
+                </div>
+                
+                <button class="btn btn-success" @click="addTempZone" style="width:100%; margin-top:10px;">＋ 新增分類</button>
+
+                <div style="margin-top: 20px; text-align: right; border-top: 1px solid #eee; padding-top: 15px;">
+                    <button class="btn btn-secondary" @click="showZoneModal = false">取消</button>
+                    <button class="btn btn-primary" @click="saveZones">儲存設定</button>
+                </div>
+            </div>
+        </div>
+
+        <div v-if="showEditModal" class="modal-overlay">
+            <div class="edit-modal">
+                <h3>✏️ 修改回應</h3>
+                <div style="margin-bottom:15px;">
+                    <label style="display:block; color:#666; margin-bottom:5px;">分類：{{ editingNote.zoneName || '自由區' }}</label>
+                    <input type="text" v-model="editingNote.text" class="input-box" style="width:100%;">
+                </div>
+                <div style="text-align:right;">
+                    <button class="btn btn-secondary" @click="showEditModal = false">取消</button>
+                    <button class="btn btn-primary" @click="confirmEdit">更新</button>
+                </div>
+            </div>
+        </div>
+
     </div>
 
     <script>
         const { createApp } = Vue;
 
-        // Firebase 設定 (維持你的設定)
         const firebaseConfig = {
             apiKey: "AIzaSyDUPGhkiJgxeYDYHqEaXCYvKh2vdTGqypw",
             authDomain: "class-discussion-01.firebaseapp.com",
@@ -165,9 +309,7 @@
             measurementId: "G-XYN5JV48T7"
         };
 
-        if (!firebase.apps.length) {
-            firebase.initializeApp(firebaseConfig);
-        }
+        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
         const db = firebase.database();
 
         createApp({
@@ -175,21 +317,29 @@
                 return {
                     isLoading: true,
                     isTeacher: false,
-                    studentId: '', // 用來識別是哪個學生 (存在 localStorage)
+                    studentId: '',
                     
                     // 資料
-                    notes: [], // 所有便利貼
-                    inputText: '',
-                    bgImage: '', // 背景圖 Base64
+                    notes: [],
+                    bgImage: '',
                     
-                    // 拖曳相關變數
+                    // 分區設定
+                    zones: [],
+                    freeText: '', 
+                    
+                    // UI 控制
+                    showToolbar: false, // 預設隱藏控制台，只顯示 icon
+                    showEditModal: false,
+                    editingNote: { key: '', text: '', zoneName: '' },
+                    showZoneModal: false,
+                    tempZones: [],
+                    
                     draggingNote: null,
                     dragOffsetX: 0,
                     dragOffsetY: 0,
                 }
             },
             computed: {
-                // 學員只看得到自己的
                 myNotes() {
                     return this.notes.filter(n => n.studentId === this.studentId).reverse();
                 }
@@ -198,122 +348,137 @@
                 const urlParams = new URLSearchParams(window.location.search);
                 this.isTeacher = urlParams.get('role') === 'teacher';
 
-                // 初始化學生 ID (如果沒有就產生一個隨機的)
                 if (!this.isTeacher) {
-                    let storedId = localStorage.getItem('class_student_id');
+                    let storedId = localStorage.getItem('class_student_id_v3');
                     if (!storedId) {
                         storedId = 'std_' + Math.random().toString(36).substr(2, 9);
-                        localStorage.setItem('class_student_id', storedId);
+                        localStorage.setItem('class_student_id_v3', storedId);
                     }
                     this.studentId = storedId;
-                    
-                    // 為了方便，學員端把 body 背景改回白色系
-                    document.body.style.backgroundColor = "#f0f2f5";
                     document.body.style.overflow = "auto";
+                } else {
+                    window.addEventListener('mousemove', this.onDrag);
+                    window.addEventListener('mouseup', this.stopDrag);
                 }
 
-                // 監聽便利貼資料
+                // 監聽便利貼
                 db.ref('board/notes').on('value', snapshot => {
                     const val = snapshot.val();
                     this.notes = val ? Object.keys(val).map(key => ({...val[key], key})) : [];
                     this.isLoading = false;
                 });
 
-                // 監聽背景圖
-                db.ref('board/background').on('value', snapshot => {
-                    this.bgImage = snapshot.val() || '';
+                db.ref('board/background').on('value', s => this.bgImage = s.val() || '');
+                
+                db.ref('board/settings/zones').on('value', s => {
+                    const data = s.val() || [];
+                    this.zones = data.map(z => ({ ...z, draftText: '' }));
                 });
-
-                // 全域滑鼠事件 (處理拖曳結束)
-                if (this.isTeacher) {
-                    window.addEventListener('mousemove', this.onDrag);
-                    window.addEventListener('mouseup', this.stopDrag);
-                }
             },
             methods: {
-                // --- 學員功能 ---
-                sendNote() {
-                    if (!this.inputText.trim()) return;
-                    
-                    // 預設位置在畫面左上角隨機一點，避免全部疊在一起
-                    const randomX = 50 + Math.random() * 200;
-                    const randomY = 100 + Math.random() * 200;
-
-                    const newNote = {
-                        text: this.inputText,
+                // 學員方法
+                sendZoneNote(zone) {
+                    if (!zone.draftText.trim()) return;
+                    const pos = this.calcPosition(zone.pos);
+                    db.ref('board/notes').push({
+                        text: zone.draftText,
                         studentId: this.studentId,
-                        x: randomX,
-                        y: randomY,
+                        zoneName: zone.name,
+                        x: pos.x, y: pos.y,
                         timestamp: Date.now()
-                    };
-
-                    db.ref('board/notes').push(newNote);
-                    this.inputText = '';
+                    });
+                    zone.draftText = '';
+                },
+                sendFreeNote() {
+                    if (!this.freeText.trim()) return;
+                    db.ref('board/notes').push({
+                        text: this.freeText,
+                        studentId: this.studentId,
+                        zoneName: '',
+                        x: 50 + Math.random() * 200, y: 100 + Math.random() * 200,
+                        timestamp: Date.now()
+                    });
+                    this.freeText = '';
+                },
+                openEditModal(note) {
+                    this.editingNote = { ...note };
+                    this.showEditModal = true;
+                },
+                confirmEdit() {
+                    const { key, text } = this.editingNote;
+                    db.ref('board/notes/' + key).update({ text });
+                    this.showEditModal = false;
                 },
 
-                // --- 講師功能 ---
-                
-                // 1. 上傳背景圖 (轉 Base64 存入 DB)
+                // 座標計算
+                calcPosition(posCode) {
+                    const W = 1200; const H = 800; const padding = 100;
+                    const rand = () => (Math.random() - 0.5) * 60;
+                    let x = W/2, y = H/2;
+                    switch(posCode) {
+                        case 'TL': x = padding; y = padding; break;
+                        case 'TR': x = W-padding-150; y = padding; break;
+                        case 'BL': x = padding; y = H-padding-100; break;
+                        case 'BR': x = W-padding-150; y = H-padding-100; break;
+                        case 'T':  x = W/2; y = padding; break;
+                        case 'B':  x = W/2; y = H-padding-100; break;
+                        case 'L':  x = padding; y = H/2; break;
+                        case 'R':  x = W-padding-150; y = H/2; break;
+                        case 'C':  x = W/2; y = H/2; break;
+                    }
+                    return { x: x + rand(), y: y + rand() };
+                },
+                getLocationLabel(code) {
+                    const map = {
+                        'TL': '↖ 左上', 'T': '↑ 上方', 'TR': '↗ 右上',
+                        'L': '← 左側', 'C': '● 中間', 'R': '→ 右側',
+                        'BL': '↙ 左下', 'B': '↓ 下方', 'BR': '↘ 右下'
+                    };
+                    return map[code] || '';
+                },
+
+                // 講師方法
+                addTempZone() { this.tempZones.push({ name: '', pos: 'C' }); },
+                removeTempZone(idx) { this.tempZones.splice(idx, 1); },
+                saveZones() {
+                    const finalZones = this.tempZones.filter(z => z.name.trim() !== '');
+                    db.ref('board/settings/zones').set(finalZones);
+                    this.showZoneModal = false;
+                },
                 handleBgUpload(event) {
                     const file = event.target.files[0];
                     if (!file) return;
-
-                    // 限制圖片大小避免 Firebase 爆掉 (簡單前端限制)
-                    if (file.size > 2 * 1024 * 1024) {
-                        alert('圖片太大囉，請選擇小於 2MB 的圖片');
-                        return;
-                    }
-
+                    if (file.size > 2 * 1024 * 1024) { alert('圖檔過大'); return; }
                     const reader = new FileReader();
-                    reader.onload = (e) => {
-                        db.ref('board/background').set(e.target.result);
-                    };
+                    reader.onload = (e) => db.ref('board/background').set(e.target.result);
                     reader.readAsDataURL(file);
                 },
-
-                // 2. 拖曳邏輯
                 startDrag(e, note) {
                     if (!this.isTeacher) return;
                     this.draggingNote = note;
-                    // 計算滑鼠點擊點與物件左上角的差距
                     this.dragOffsetX = e.clientX - note.x;
                     this.dragOffsetY = e.clientY - note.y;
                 },
                 onDrag(e) {
                     if (this.draggingNote) {
                         e.preventDefault();
-                        // 暫時更新本地數據以達到流暢動畫效果
                         this.draggingNote.x = e.clientX - this.dragOffsetX;
                         this.draggingNote.y = e.clientY - this.dragOffsetY;
                     }
                 },
                 stopDrag() {
                     if (this.draggingNote) {
-                        // 拖曳結束，將最終座標寫入 Firebase
                         const { key, x, y } = this.draggingNote;
                         db.ref(`board/notes/${key}`).update({ x, y });
                         this.draggingNote = null;
                     }
                 },
-
-                // 3. 刪除與清空
-                deleteNote(key) {
-                    if(confirm('確定刪除這張便利貼？')) {
-                        db.ref(`board/notes/${key}`).remove();
-                    }
-                },
-                clearBoard() {
-                    if(confirm('確定要清空所有便利貼嗎？(背景圖會保留)')) {
-                        db.ref('board/notes').remove();
-                    }
-                },
-
-                // 輔助：根據 key 產生偽隨機顏色
-                getColorClass(key) {
-                    const charCode = key.charCodeAt(key.length - 1);
-                    const mod = charCode % 4;
-                    return `color-${mod + 1}`;
-                }
+                deleteNote(key) { if(confirm('確定刪除？')) db.ref(`board/notes/${key}`).remove(); },
+                clearBoard() { if(confirm('確定清空？')) db.ref('board/notes').remove(); },
+                getColorClass(key) { return `color-${(key.charCodeAt(key.length-1)%4)+1}`; },
+            },
+            watch: {
+                showZoneModal(val) { if (val) this.tempZones = JSON.parse(JSON.stringify(this.zones)); }
             }
         }).mount('#app');
     </script>
