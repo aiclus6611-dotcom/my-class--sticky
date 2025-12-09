@@ -65,8 +65,7 @@
             background-position: center;
         }
 
-        /* 改進後的講師控制台 */
-        /* 1. 觸發按鈕 (預設顯示) */
+        /* 講師控制台 */
         .toolbar-trigger {
             position: fixed; bottom: 20px; right: 20px;
             width: 50px; height: 50px; border-radius: 50%;
@@ -78,7 +77,6 @@
         }
         .toolbar-trigger:hover { background: rgba(0,0,0,0.8); transform: scale(1.1); }
 
-        /* 2. 控制台本體 (展開時) */
         .toolbar {
             position: fixed; bottom: 0; left: 0; right: 0;
             background: rgba(0, 0, 0, 0.9); 
@@ -165,23 +163,18 @@
                 </div>
                 
                 <div style="display:flex; align-items:center; gap: 5px;">
-                    <button class="btn btn-primary" @click="showZoneModal = true">⚙️ 設定分區</button>
+                    <button class="btn btn-primary" @click="showZoneModal = true">⚙️ 設定分區/提示</button>
                     <label class="btn btn-upload">
                         🖼️ 背景
                         <input type="file" accept="image/*" style="display: none;" @change="handleBgUpload">
                     </label>
                     <button class="btn btn-danger" @click="clearBoard">🗑️ 清空</button>
-                    
                     <div style="width:1px; height:25px; background:#555; margin:0 10px;"></div>
-                    
                     <button class="btn btn-icon" @click="showToolbar = false" title="隱藏控制台">▼ 收起</button>
                 </div>
             </div>
 
-            <div v-else class="toolbar-trigger" @click="showToolbar = true" title="開啟講師控制台">
-                ⚙️
-            </div>
-
+            <div v-else class="toolbar-trigger" @click="showToolbar = true" title="開啟講師控制台">⚙️</div>
         </div>
 
         <div v-else class="student-wrapper">
@@ -200,7 +193,7 @@
                             <input 
                                 type="text" 
                                 v-model="z.draftText" 
-                                :placeholder="'輸入「' + z.name + '」的想法...'"
+                                :placeholder="'請輸入關於「' + z.name + '」' + (promptSuffix || '的想法') + '...'"
                                 @keydown.enter="sendZoneNote(z)"
                             >
                             <button class="btn btn-primary" @click="sendZoneNote(z)">送出</button>
@@ -251,9 +244,19 @@
 
         <div v-if="showZoneModal" class="modal-overlay">
             <div class="modal-box">
-                <h3>分區與落點設定</h3>
-                <p style="color:#666; font-size:0.9rem;">設定分類名稱，並指定學員送出後便利貼會自動飛到的位置。</p>
+                <h3 style="margin-top:0;">分區與提示設定</h3>
                 
+                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #eee;">
+                    <label style="font-weight:bold; display:block; margin-bottom:5px;">學員輸入框提示結尾：</label>
+                    <div style="display:flex; gap:10px;">
+                        <input type="text" v-model="tempSuffix" placeholder="例如：的想法、的條件..." style="flex:1;">
+                    </div>
+                    <div style="font-size: 0.9rem; color: #666; margin-top: 8px;">
+                        預覽：請輸入關於「分類」<b style="color:#1976d2">{{ tempSuffix || '的想法' }}</b>...
+                    </div>
+                </div>
+
+                <p style="color:#666; font-size:0.9rem; margin-bottom:10px; font-weight:bold;">分類落點設定：</p>
                 <div v-for="(z, idx) in tempZones" :key="idx" class="zone-row">
                     <input type="text" v-model="z.name" placeholder="分類名稱 (例: 知識)">
                     <select v-model="z.pos">
@@ -323,16 +326,18 @@
                     notes: [],
                     bgImage: '',
                     
-                    // 分區設定
+                    // 分區與提示設定
                     zones: [],
+                    promptSuffix: '的想法', // 預設提示語
                     freeText: '', 
                     
                     // UI 控制
-                    showToolbar: false, // 預設隱藏控制台，只顯示 icon
+                    showToolbar: false,
                     showEditModal: false,
                     editingNote: { key: '', text: '', zoneName: '' },
                     showZoneModal: false,
                     tempZones: [],
+                    tempSuffix: '', // Modal 裡的暫存值
                     
                     draggingNote: null,
                     dragOffsetX: 0,
@@ -361,7 +366,6 @@
                     window.addEventListener('mouseup', this.stopDrag);
                 }
 
-                // 監聽便利貼
                 db.ref('board/notes').on('value', snapshot => {
                     const val = snapshot.val();
                     this.notes = val ? Object.keys(val).map(key => ({...val[key], key})) : [];
@@ -370,13 +374,18 @@
 
                 db.ref('board/background').on('value', s => this.bgImage = s.val() || '');
                 
+                // 監聽分區設定
                 db.ref('board/settings/zones').on('value', s => {
                     const data = s.val() || [];
                     this.zones = data.map(z => ({ ...z, draftText: '' }));
                 });
+
+                // 監聽提示語設定
+                db.ref('board/settings/promptSuffix').on('value', s => {
+                    this.promptSuffix = s.val() || '的想法';
+                });
             },
             methods: {
-                // 學員方法
                 sendZoneNote(zone) {
                     if (!zone.draftText.trim()) return;
                     const pos = this.calcPosition(zone.pos);
@@ -409,8 +418,6 @@
                     db.ref('board/notes/' + key).update({ text });
                     this.showEditModal = false;
                 },
-
-                // 座標計算
                 calcPosition(posCode) {
                     const W = 1200; const H = 800; const padding = 100;
                     const rand = () => (Math.random() - 0.5) * 60;
@@ -437,12 +444,18 @@
                     return map[code] || '';
                 },
 
-                // 講師方法
+                // 講師設定相關
                 addTempZone() { this.tempZones.push({ name: '', pos: 'C' }); },
                 removeTempZone(idx) { this.tempZones.splice(idx, 1); },
                 saveZones() {
                     const finalZones = this.tempZones.filter(z => z.name.trim() !== '');
-                    db.ref('board/settings/zones').set(finalZones);
+                    
+                    // 同時儲存分區和提示語
+                    db.ref('board/settings').update({
+                        zones: finalZones,
+                        promptSuffix: this.tempSuffix || '的想法'
+                    });
+                    
                     this.showZoneModal = false;
                 },
                 handleBgUpload(event) {
@@ -478,7 +491,13 @@
                 getColorClass(key) { return `color-${(key.charCodeAt(key.length-1)%4)+1}`; },
             },
             watch: {
-                showZoneModal(val) { if (val) this.tempZones = JSON.parse(JSON.stringify(this.zones)); }
+                showZoneModal(val) { 
+                    if (val) {
+                        this.tempZones = JSON.parse(JSON.stringify(this.zones));
+                        // 開啟視窗時，把目前的提示語帶入輸入框
+                        this.tempSuffix = this.promptSuffix;
+                    }
+                }
             }
         }).mount('#app');
     </script>
