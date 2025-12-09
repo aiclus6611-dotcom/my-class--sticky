@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>結構化互動白板 (響應式版)</title>
+    <title>結構化互動白板 (畫布縮放版)</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
@@ -56,13 +56,31 @@
             margin-bottom: 4px; font-weight: bold; margin-right: 5px;
         }
 
-        /* --- 講師端樣式 (白板) --- */
-        .teacher-board { 
-            position: relative; width: 100vw; height: 100vh; overflow: hidden; 
-            background-color: #e0e0e0; 
-            background-size: contain; 
-            background-repeat: no-repeat;
-            background-position: center;
+        /* --- 講師端樣式 (新架構：畫布縮放) --- */
+        .teacher-viewport {
+            width: 100vw; height: 100vh; 
+            overflow: hidden; /* 隱藏捲軸，改用 transform 移動 */
+            background-color: #333; /* 視窗外的顏色 */
+            position: relative;
+            cursor: grab; /* 預設手型，表示可拖曳畫布 */
+        }
+        .teacher-viewport:active { cursor: grabbing; }
+
+        /* 這是真正的「紙」，所有東西都在這上面 */
+        .canvas-layer {
+            position: absolute;
+            transform-origin: 0 0; /* 縮放原點設為左上角 */
+            background-color: #e0e0e0; /* 沒圖時的白板顏色 */
+            box-shadow: 0 0 50px rgba(0,0,0,0.5); /* 讓畫布有點立體感 */
+            transition: transform 0.05s linear; /* 讓拖曳縮放稍微平滑一點點 */
+        }
+
+        /* 背景圖 */
+        .bg-img {
+            width: 100%; height: 100%;
+            object-fit: contain; /* 確保圖片不變形 */
+            pointer-events: none; /* 讓滑鼠可以直接點穿圖片去拖曳畫布 */
+            display: block;
         }
 
         /* 講師控制台 */
@@ -99,13 +117,14 @@
             background: #ffeb3b; padding: 15px;
             box-shadow: 2px 5px 15px rgba(0,0,0,0.3);
             font-size: 1.1rem; line-height: 1.4;
-            cursor: grab; transform: rotate(-1deg);
-            transition: box-shadow 0.2s, transform 0.1s;
+            transform: rotate(-1deg);
             border-radius: 2px 2px 15px 2px; word-wrap: break-word; z-index: 100;
-            /* 避免文字選取干擾拖曳 */
             user-select: none; 
+            cursor: move; /* 便利貼上顯示移動游標 */
         }
-        .sticky-note:active { cursor: grabbing; transform: scale(1.05); z-index: 999; }
+        /* 避免與畫布拖曳衝突，需要停止冒泡 */
+        .sticky-note:active { transform: scale(1.05); z-index: 999; cursor: grabbing; }
+
         .sticky-tag {
             display: inline-block; background: rgba(0,0,0,0.1); 
             font-size: 0.8rem; padding: 2px 6px; border-radius: 4px; 
@@ -144,43 +163,48 @@
             載入中...
         </div>
 
-        <div v-if="isTeacher" class="teacher-board" :style="{ backgroundImage: bgImage ? 'url(' + bgImage + ')' : 'none' }">
+        <div v-if="isTeacher" class="teacher-viewport" 
+             @mousedown.self="startPan" 
+             @wheel.prevent="handleZoom">
             
-            <div v-for="note in notes" 
-                 :key="note.key"
-                 class="sticky-note"
-                 :class="getColorClass(note.key)"
-                 :style="{ left: note.x + '%', top: note.y + '%' }"
-                 @mousedown="startDrag($event, note)"
-                 @touchstart="startDragTouch($event, note)" 
-            >
-                <div v-if="note.zoneName" class="sticky-tag">{{ note.zoneName }}</div>
-                {{ note.text }}
-                <div class="note-close" @click.stop="deleteNote(note.key)">✕</div>
+            <div class="canvas-layer" :style="canvasStyle">
+                
+                <img v-if="bgImage" :src="bgImage" class="bg-img" @load="onImgLoad">
+                <div v-else style="width: 100%; height: 100%;"></div>
+
+                <div v-for="note in notes" 
+                     :key="note.key"
+                     class="sticky-note"
+                     :class="getColorClass(note.key)"
+                     :style="{ left: note.x + '%', top: note.y + '%' }"
+                     @mousedown.stop="startDragNote($event, note)"
+                >
+                    <div v-if="note.zoneName" class="sticky-tag">{{ note.zoneName }}</div>
+                    {{ note.text }}
+                    <div class="note-close" @click.stop="deleteNote(note.key)">✕</div>
+                </div>
             </div>
 
             <div v-if="showToolbar" class="toolbar">
                 <div style="display:flex; gap:10px; align-items:center;">
                     <strong style="font-size:1.1rem;">講師控制台</strong>
-                    <span style="color:#bbb; font-size:0.9rem;">(便利貼: {{ notes.length }})</span>
+                    <span style="color:#bbb; font-size:0.9rem;">(滑鼠滾輪可縮放)</span>
                 </div>
                 
                 <div style="display:flex; align-items:center; gap: 5px;">
+                    <button class="btn btn-secondary" @click="resetView">🔍 置中/還原</button>
                     <button class="btn btn-primary" @click="showZoneModal = true">⚙️ 分區設定</button>
-                    
                     <label class="btn btn-upload">
                         🖼️ 更換背景
                         <input type="file" accept="image/*" style="display: none;" @change="handleBgUpload">
                     </label>
-                    <button v-if="bgImage" class="btn btn-danger" @click="removeBackground" title="移除背景圖，變回白板">✕ 移除背景</button>
-                    
+                    <button v-if="bgImage" class="btn btn-danger" @click="removeBackground">✕ 移除背景</button>
                     <button class="btn btn-danger" @click="clearBoard">🗑️ 清空貼紙</button>
                     <div style="width:1px; height:25px; background:#555; margin:0 10px;"></div>
-                    <button class="btn btn-icon" @click="showToolbar = false" title="隱藏控制台">▼ 收起</button>
+                    <button class="btn btn-icon" @click="showToolbar = false" title="隱藏">▼</button>
                 </div>
             </div>
-
-            <div v-else class="toolbar-trigger" @click="showToolbar = true" title="開啟講師控制台">⚙️</div>
+            <div v-else class="toolbar-trigger" @click="showToolbar = true" title="開啟設定">⚙️</div>
         </div>
 
         <div v-else class="student-wrapper">
@@ -188,52 +212,30 @@
                 <h2 style="text-align: center; color: #333; margin-top:0; margin-bottom: 20px;">
                     📝 請針對以下項目提供回應
                 </h2>
-
                 <div v-if="zones.length > 0">
                     <div v-for="(z, idx) in zones" :key="idx" class="zone-card">
-                        <h3>
-                            {{ z.name }}
-                            <span class="zone-hint">({{ getLocationLabel(z.pos) }})</span>
-                        </h3>
+                        <h3>{{ z.name }} <span class="zone-hint">({{ getLocationLabel(z.pos) }})</span></h3>
                         <div class="input-row">
-                            <input 
-                                type="text" 
-                                v-model="z.draftText" 
-                                :placeholder="'請輸入關於「' + z.name + '」' + (promptSuffix || '的想法') + '...'"
-                                @keydown.enter="sendZoneNote(z)"
-                            >
+                            <input type="text" v-model="z.draftText" :placeholder="'請輸入關於「' + z.name + '」' + (promptSuffix || '的想法') + '...'" @keydown.enter="sendZoneNote(z)">
                             <button class="btn btn-primary" @click="sendZoneNote(z)">送出</button>
                         </div>
                     </div>
                 </div>
-
                 <div v-else class="zone-card" style="border-left-color: #999;">
                     <h3>自由發言區</h3>
                     <div class="input-row">
-                        <input 
-                            type="text" 
-                            v-model="freeText" 
-                            placeholder="請輸入您的想法..."
-                            @keydown.enter="sendFreeNote"
-                        >
+                        <input type="text" v-model="freeText" placeholder="請輸入您的想法..." @keydown.enter="sendFreeNote">
                         <button class="btn btn-primary" @click="sendFreeNote">送出</button>
                     </div>
                 </div>
-
                 <hr style="margin: 30px 0; border: 0; border-top: 1px dashed #ccc;">
-
                 <div class="my-list-section">
                     <h3 style="color:#555; margin-top:0;">我的紀錄 ({{ myNotes.length }})</h3>
                     <div v-if="myNotes.length > 0">
                         <div v-for="note in myNotes" :key="note.key" class="my-item">
                             <div style="flex:1; padding-right:10px;">
-                                <div>
-                                    <span v-if="note.zoneName" class="note-tag">{{ note.zoneName }}</span>
-                                    <span style="font-size:1.1rem; color:#333;">{{ note.text }}</span>
-                                </div>
-                                <div style="font-size:0.8rem; color:#999; margin-top:5px;">
-                                    {{ new Date(note.timestamp).toLocaleTimeString() }}
-                                </div>
+                                <div><span v-if="note.zoneName" class="note-tag">{{ note.zoneName }}</span><span style="font-size:1.1rem; color:#333;">{{ note.text }}</span></div>
+                                <div style="font-size:0.8rem; color:#999; margin-top:5px;">{{ new Date(note.timestamp).toLocaleTimeString() }}</div>
                             </div>
                             <div style="white-space:nowrap;">
                                 <button class="btn btn-secondary" @click="openEditModal(note)">修改</button>
@@ -241,9 +243,7 @@
                             </div>
                         </div>
                     </div>
-                    <div v-else style="text-align:center; color:#999; font-style:italic; padding:20px;">
-                        尚無內容...
-                    </div>
+                    <div v-else style="text-align:center; color:#999; font-style:italic; padding:20px;">尚無內容...</div>
                 </div>
             </div>
         </div>
@@ -251,62 +251,39 @@
         <div v-if="showZoneModal" class="modal-overlay">
             <div class="modal-box">
                 <h3 style="margin-top:0;">分區與提示設定</h3>
-                
                 <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #eee;">
                     <label style="font-weight:bold; display:block; margin-bottom:5px;">學員輸入框提示結尾：</label>
-                    <div style="display:flex; gap:10px;">
-                        <input type="text" v-model="tempSuffix" placeholder="例如：的想法、的條件..." style="flex:1;">
-                    </div>
-                    <div style="font-size: 0.9rem; color: #666; margin-top: 8px;">
-                        預覽：請輸入關於「分類」<b style="color:#1976d2">{{ tempSuffix || '的想法' }}</b>...
-                    </div>
+                    <input type="text" v-model="tempSuffix" placeholder="例如：的想法、的條件..." style="width:100%; padding:8px;">
                 </div>
-
-                <p style="color:#666; font-size:0.9rem; margin-bottom:10px; font-weight:bold;">分類落點設定 (會自動轉換為畫面比例)：</p>
                 <div v-for="(z, idx) in tempZones" :key="idx" class="zone-row">
-                    <input type="text" v-model="z.name" placeholder="分類名稱 (例: 知識)">
+                    <input type="text" v-model="z.name" placeholder="分類名稱">
                     <select v-model="z.pos">
-                        <option value="TL">↖ 左上</option>
-                        <option value="TR">↗ 右上</option>
-                        <option value="BL">↙ 左下</option>
-                        <option value="BR">↘ 右下</option>
-                        <option value="T">↑ 上方</option>
-                        <option value="B">↓ 下方</option>
-                        <option value="L">← 左側</option>
-                        <option value="R">→ 右側</option>
-                        <option value="C">● 中間</option>
+                        <option value="TL">↖ 左上</option><option value="TR">↗ 右上</option><option value="BL">↙ 左下</option><option value="BR">↘ 右下</option>
+                        <option value="T">↑ 上方</option><option value="B">↓ 下方</option><option value="L">← 左側</option><option value="R">→ 右側</option><option value="C">● 中間</option>
                     </select>
                     <button class="btn btn-danger" @click="removeTempZone(idx)">✕</button>
                 </div>
-                
                 <button class="btn btn-success" @click="addTempZone" style="width:100%; margin-top:10px;">＋ 新增分類</button>
-
                 <div style="margin-top: 20px; text-align: right; border-top: 1px solid #eee; padding-top: 15px;">
                     <button class="btn btn-secondary" @click="showZoneModal = false">取消</button>
                     <button class="btn btn-primary" @click="saveZones">儲存設定</button>
                 </div>
             </div>
         </div>
-
         <div v-if="showEditModal" class="modal-overlay">
             <div class="edit-modal">
                 <h3>✏️ 修改回應</h3>
-                <div style="margin-bottom:15px;">
-                    <label style="display:block; color:#666; margin-bottom:5px;">分類：{{ editingNote.zoneName || '自由區' }}</label>
-                    <input type="text" v-model="editingNote.text" class="input-box" style="width:100%;">
-                </div>
+                <input type="text" v-model="editingNote.text" class="input-box" style="width:100%; margin-bottom:15px;">
                 <div style="text-align:right;">
                     <button class="btn btn-secondary" @click="showEditModal = false">取消</button>
                     <button class="btn btn-primary" @click="confirmEdit">更新</button>
                 </div>
             </div>
         </div>
-
     </div>
 
     <script>
         const { createApp } = Vue;
-
         const firebaseConfig = {
             apiKey: "AIzaSyDUPGhkiJgxeYDYHqEaXCYvKh2vdTGqypw",
             authDomain: "class-discussion-01.firebaseapp.com",
@@ -317,7 +294,6 @@
             appId: "1:724687365020:web:380b5d85872dc2d9b85e59",
             measurementId: "G-XYN5JV48T7"
         };
-
         if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
         const db = firebase.database();
 
@@ -327,35 +303,46 @@
                     isLoading: true,
                     isTeacher: false,
                     studentId: '',
-                    
-                    // 資料
                     notes: [],
                     bgImage: '',
-                    
-                    // 設定
                     zones: [],
                     promptSuffix: '的想法',
                     freeText: '', 
-                    
-                    // UI 控制
                     showToolbar: false,
                     showEditModal: false,
                     editingNote: { key: '', text: '', zoneName: '' },
                     showZoneModal: false,
                     tempZones: [],
                     tempSuffix: '',
-                    
-                    // 拖曳暫存 (使用百分比計算)
+
+                    // === 畫布系統變數 ===
+                    // 預設畫布大小 (無圖時用)
+                    canvasW: 1280, 
+                    canvasH: 720,
+                    // 視窗變換 (Transform)
+                    scale: 1,
+                    panning: false,
+                    pointX: 0, 
+                    pointY: 0,
+                    startX: 0, 
+                    startY: 0,
+
+                    // 拖曳便利貼變數
                     draggingNote: null,
-                    dragStartX: 0,
-                    dragStartY: 0,
-                    dragStartNoteX: 0, // %
-                    dragStartNoteY: 0, // %
+                    noteDragStartX: 0, // 初始滑鼠 X
+                    noteDragStartY: 0, // 初始滑鼠 Y
+                    noteInitialPercentX: 0, 
+                    noteInitialPercentY: 0,
                 }
             },
             computed: {
-                myNotes() {
-                    return this.notes.filter(n => n.studentId === this.studentId).reverse();
+                myNotes() { return this.notes.filter(n => n.studentId === this.studentId).reverse(); },
+                canvasStyle() {
+                    return {
+                        width: this.canvasW + 'px',
+                        height: this.canvasH + 'px',
+                        transform: `translate(${this.pointX}px, ${this.pointY}px) scale(${this.scale})`
+                    }
                 }
             },
             mounted() {
@@ -371,11 +358,7 @@
                     this.studentId = storedId;
                     document.body.style.overflow = "auto";
                 } else {
-                    // 講師端監聽滑鼠與觸控
-                    window.addEventListener('mousemove', this.onDrag);
-                    window.addEventListener('mouseup', this.stopDrag);
-                    window.addEventListener('touchmove', this.onTouchDrag, { passive: false });
-                    window.addEventListener('touchend', this.stopDrag);
+                    // 講師端不需要 overflow (由 transform 處理)
                 }
 
                 db.ref('board/notes').on('value', snapshot => {
@@ -384,76 +367,167 @@
                     this.isLoading = false;
                 });
 
-                db.ref('board/background').on('value', s => this.bgImage = s.val() || '');
+                db.ref('board/background').on('value', s => {
+                    this.bgImage = s.val() || '';
+                    if (!this.bgImage) {
+                        // 沒圖時，重設為預設大小
+                        this.canvasW = 1280;
+                        this.canvasH = 720;
+                    }
+                    // 有圖時由 onImgLoad 處理大小
+                });
                 
-                db.ref('board/settings/zones').on('value', s => {
-                    const data = s.val() || [];
-                    this.zones = data.map(z => ({ ...z, draftText: '' }));
+                db.ref('board/settings').on('value', s => {
+                    const val = s.val() || {};
+                    this.zones = (val.zones || []).map(z => ({ ...z, draftText: '' }));
+                    this.promptSuffix = val.promptSuffix || '的想法';
                 });
-
-                db.ref('board/settings/promptSuffix').on('value', s => {
-                    this.promptSuffix = s.val() || '的想法';
-                });
+                
+                // 預設置中
+                this.resetView();
             },
             methods: {
+                // === 畫布操作邏輯 (Pan & Zoom) ===
+                onImgLoad(e) {
+                    // 圖片載入後，將畫布大小設為圖片原始大小
+                    this.canvasW = e.target.naturalWidth;
+                    this.canvasH = e.target.naturalHeight;
+                    this.resetView(); // 載入新圖後自動置中
+                },
+                startPan(e) {
+                    this.panning = true;
+                    this.startX = e.clientX - this.pointX;
+                    this.startY = e.clientY - this.pointY;
+                    window.addEventListener('mousemove', this.onPan);
+                    window.addEventListener('mouseup', this.stopPan);
+                },
+                onPan(e) {
+                    if (!this.panning) return;
+                    e.preventDefault();
+                    this.pointX = e.clientX - this.startX;
+                    this.pointY = e.clientY - this.startY;
+                },
+                stopPan() {
+                    this.panning = false;
+                    window.removeEventListener('mousemove', this.onPan);
+                    window.removeEventListener('mouseup', this.stopPan);
+                },
+                handleZoom(e) {
+                    const zoomSensitivity = 0.001;
+                    const delta = -e.deltaY * zoomSensitivity;
+                    const newScale = Math.min(Math.max(0.1, this.scale + delta), 5); // 限制縮放 0.1x ~ 5x
+                    
+                    // 滑鼠為中心縮放算法
+                    // 1. 取得滑鼠在畫布內的相對位置 (還沒縮放前)
+                    const mouseX = e.clientX - this.pointX;
+                    const mouseY = e.clientY - this.pointY;
+
+                    // 2. 計算新的位移量，讓滑鼠底下的點保持不動
+                    // 公式：新的偏移 = 滑鼠位置 - (滑鼠在舊縮放下的相對值 * 新縮放率)
+                    // 但這裡簡化處理：直接調整 pointX/Y 來補償
+                    // 實際上簡單做法：
+                    // this.pointX -= mouseX / this.scale * (newScale - this.scale);
+                    // this.pointY -= mouseY / this.scale * (newScale - this.scale);
+                    
+                    // 這裡使用更直覺的中心縮放
+                    const ratio = 1 - newScale / this.scale;
+                    this.pointX += (e.clientX - this.pointX) * ratio;
+                    this.pointY += (e.clientY - this.pointY) * ratio;
+
+                    this.scale = newScale;
+                },
+                resetView() {
+                    // 自動計算最適合的縮放比例 (Contain)
+                    const winW = window.innerWidth;
+                    const winH = window.innerHeight;
+                    const scaleW = winW / this.canvasW;
+                    const scaleH = winH / this.canvasH;
+                    
+                    // 留一點邊距 (0.9)
+                    this.scale = Math.min(scaleW, scaleH) * 0.9;
+                    
+                    // 置中
+                    this.pointX = (winW - this.canvasW * this.scale) / 2;
+                    this.pointY = (winH - this.canvasH * this.scale) / 2;
+                },
+
+                // === 便利貼拖曳 (邏輯修正) ===
+                startDragNote(e, note) {
+                    this.draggingNote = note;
+                    this.noteDragStartX = e.clientX;
+                    this.noteDragStartY = e.clientY;
+                    this.noteInitialPercentX = note.x;
+                    this.noteInitialPercentY = note.y;
+                    
+                    window.addEventListener('mousemove', this.onNoteDrag);
+                    window.addEventListener('mouseup', this.stopNoteDrag);
+                },
+                onNoteDrag(e) {
+                    if (!this.draggingNote) return;
+                    e.preventDefault();
+                    
+                    // 1. 計算滑鼠移動的像素距離
+                    const dxPx = e.clientX - this.noteDragStartX;
+                    const dyPx = e.clientY - this.noteDragStartY;
+                    
+                    // 2. 關鍵：將像素距離轉為畫布百分比
+                    // 移動距離 / (畫布當前渲染寬度) * 100
+                    // 畫布渲染寬度 = 原始寬度 * 縮放率
+                    const dxPercent = (dxPx / (this.canvasW * this.scale)) * 100;
+                    const dyPercent = (dyPx / (this.canvasH * this.scale)) * 100;
+
+                    this.draggingNote.x = this.noteInitialPercentX + dxPercent;
+                    this.draggingNote.y = this.noteInitialPercentY + dyPercent;
+                },
+                stopNoteDrag() {
+                    if (this.draggingNote) {
+                        const { key, x, y } = this.draggingNote;
+                        db.ref(`board/notes/${key}`).update({ x, y });
+                        this.draggingNote = null;
+                        window.removeEventListener('mousemove', this.onNoteDrag);
+                        window.removeEventListener('mouseup', this.stopNoteDrag);
+                    }
+                },
+
+                // === 以下保持原邏輯 ===
                 sendZoneNote(zone) {
                     if (!zone.draftText.trim()) return;
-                    // 取得百分比位置
                     const pos = this.calcPercentPosition(zone.pos);
                     db.ref('board/notes').push({
-                        text: zone.draftText,
-                        studentId: this.studentId,
-                        zoneName: zone.name,
-                        x: pos.x, y: pos.y, // 存入百分比
-                        timestamp: Date.now()
+                        text: zone.draftText, studentId: this.studentId, zoneName: zone.name,
+                        x: pos.x, y: pos.y, timestamp: Date.now()
                     });
                     zone.draftText = '';
                 },
                 sendFreeNote() {
                     if (!this.freeText.trim()) return;
                     db.ref('board/notes').push({
-                        text: this.freeText,
-                        studentId: this.studentId,
-                        zoneName: '',
-                        x: 10 + Math.random() * 60, y: 20 + Math.random() * 60, // 隨機百分比
-                        timestamp: Date.now()
+                        text: this.freeText, studentId: this.studentId, zoneName: '',
+                        x: 10 + Math.random() * 60, y: 20 + Math.random() * 60, timestamp: Date.now()
                     });
                     this.freeText = '';
                 },
-                
-                // === 新：座標計算改為百分比 (0~100) ===
                 calcPercentPosition(posCode) {
-                    const rand = () => (Math.random() - 0.5) * 5; // 隨機偏移 5%
-                    let x = 40, y = 40; // 預設中間
-
-                    // 這裡的數值代表百分比 (例如 5 代表 5%)
+                    const rand = () => (Math.random() - 0.5) * 5;
+                    let x = 40, y = 40;
                     switch(posCode) {
-                        case 'TL': x = 5;  y = 5; break;   // 左上
-                        case 'T':  x = 40; y = 5; break;   // 上方
-                        case 'TR': x = 75; y = 5; break;   // 右上
-                        case 'L':  x = 5;  y = 40; break;  // 左側
-                        case 'C':  x = 40; y = 40; break;  // 中間
-                        case 'R':  x = 75; y = 40; break;  // 右側
-                        case 'BL': x = 5;  y = 75; break;  // 左下
-                        case 'B':  x = 40; y = 75; break;  // 下方
-                        case 'BR': x = 75; y = 75; break;  // 右下
+                        case 'TL': x = 5;  y = 5; break;   case 'T':  x = 40; y = 5; break;   case 'TR': x = 75; y = 5; break;
+                        case 'L':  x = 5;  y = 40; break;  case 'C':  x = 40; y = 40; break;  case 'R':  x = 75; y = 40; break;
+                        case 'BL': x = 5;  y = 75; break;  case 'B':  x = 40; y = 75; break;  case 'BR': x = 75; y = 75; break;
                     }
                     return { x: x + rand(), y: y + rand() };
                 },
-
-                // 講師功能
+                getLocationLabel(code) {
+                    const map = { 'TL': '↖ 左上', 'T': '↑ 上方', 'TR': '↗ 右上', 'L': '← 左側', 'C': '● 中間', 'R': '→ 右側', 'BL': '↙ 左下', 'B': '↓ 下方', 'BR': '↘ 右下' };
+                    return map[code] || '';
+                },
                 addTempZone() { this.tempZones.push({ name: '', pos: 'C' }); },
                 removeTempZone(idx) { this.tempZones.splice(idx, 1); },
                 saveZones() {
                     const finalZones = this.tempZones.filter(z => z.name.trim() !== '');
-                    db.ref('board/settings').update({
-                        zones: finalZones,
-                        promptSuffix: this.tempSuffix || '的想法'
-                    });
+                    db.ref('board/settings').update({ zones: finalZones, promptSuffix: this.tempSuffix || '的想法' });
                     this.showZoneModal = false;
                 },
-                
-                // 背景圖處理
                 handleBgUpload(event) {
                     const file = event.target.files[0];
                     if (!file) return;
@@ -462,61 +536,9 @@
                     reader.onload = (e) => db.ref('board/background').set(e.target.result);
                     reader.readAsDataURL(file);
                 },
-                removeBackground() {
-                    if(confirm('確定要移除背景圖嗎？便利貼位置將保留。')) {
-                        db.ref('board/background').remove();
-                    }
-                },
-
-                // === 新：拖曳邏輯 (像素轉百分比) ===
-                startDrag(e, note) { this.initDrag(e.clientX, e.clientY, note); },
-                startDragTouch(e, note) { this.initDrag(e.touches[0].clientX, e.touches[0].clientY, note); },
-                
-                initDrag(clientX, clientY, note) {
-                    if (!this.isTeacher) return;
-                    this.draggingNote = note;
-                    this.dragStartX = clientX;
-                    this.dragStartY = clientY;
-                    this.dragStartNoteX = note.x; // 初始 %
-                    this.dragStartNoteY = note.y; // 初始 %
-                },
-                
-                onDrag(e) { this.processDrag(e.clientX, e.clientY); },
-                onTouchDrag(e) { 
-                    e.preventDefault(); // 防止滑動畫面
-                    this.processDrag(e.touches[0].clientX, e.touches[0].clientY); 
-                },
-
-                processDrag(clientX, clientY) {
-                    if (this.draggingNote) {
-                        const winW = window.innerWidth;
-                        const winH = window.innerHeight;
-                        
-                        // 計算移動的像素距離
-                        const dxPx = clientX - this.dragStartX;
-                        const dyPx = clientY - this.dragStartY;
-
-                        // 將像素距離換算成百分比
-                        const dxPercent = (dxPx / winW) * 100;
-                        const dyPercent = (dyPx / winH) * 100;
-
-                        // 更新暫存位置
-                        this.draggingNote.x = this.dragStartNoteX + dxPercent;
-                        this.draggingNote.y = this.dragStartNoteY + dyPercent;
-                    }
-                },
-
-                stopDrag() {
-                    if (this.draggingNote) {
-                        const { key, x, y } = this.draggingNote;
-                        db.ref(`board/notes/${key}`).update({ x, y });
-                        this.draggingNote = null;
-                    }
-                },
-
-                // 其他
+                removeBackground() { if(confirm('確定移除背景？')) db.ref('board/background').remove(); },
                 deleteNote(key) { if(confirm('確定刪除？')) db.ref(`board/notes/${key}`).remove(); },
-                clearBoard() { if(confirm('確定清空？此操作不可復原。')) db.ref('board/notes').remove(); },
+                clearBoard() { if(confirm('確定清空？')) db.ref('board/notes').remove(); },
                 getColorClass(key) { return `color-${(key.charCodeAt(key.length-1)%4)+1}`; },
                 openEditModal(note) { this.editingNote = { ...note }; this.showEditModal = true; },
                 confirmEdit() {
@@ -524,18 +546,9 @@
                     db.ref('board/notes/' + key).update({ text });
                     this.showEditModal = false;
                 },
-                getLocationLabel(code) {
-                    const map = { 'TL': '↖ 左上', 'T': '↑ 上方', 'TR': '↗ 右上', 'L': '← 左側', 'C': '● 中間', 'R': '→ 右側', 'BL': '↙ 左下', 'B': '↓ 下方', 'BR': '↘ 右下' };
-                    return map[code] || '';
-                }
             },
             watch: {
-                showZoneModal(val) { 
-                    if (val) {
-                        this.tempZones = JSON.parse(JSON.stringify(this.zones));
-                        this.tempSuffix = this.promptSuffix;
-                    }
-                }
+                showZoneModal(val) { if (val) { this.tempZones = JSON.parse(JSON.stringify(this.zones)); this.tempSuffix = this.promptSuffix; } }
             }
         }).mount('#app');
     </script>
