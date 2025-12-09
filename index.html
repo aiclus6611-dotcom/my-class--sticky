@@ -2,8 +2,8 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>結構化互動白板</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>結構化互動白板 (響應式版)</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
@@ -18,7 +18,7 @@
         .btn-success { background: #4caf50; color: white; }
         .btn-danger { background: #d32f2f; color: white; }
         .btn-secondary { background: #757575; color: white; }
-        .btn-upload { background: #ff9800; color: white; display: inline-block; cursor: pointer; }
+        .btn-upload { background: #ff9800; color: white; display: inline-block; cursor: pointer; padding: 8px 16px; border-radius: 4px; margin: 5px;}
         .btn-icon { background: transparent; color: #ccc; font-size: 1.2rem; padding: 5px 10px; }
         .btn-icon:hover { color: white; background: rgba(255,255,255,0.1); }
         
@@ -102,6 +102,8 @@
             cursor: grab; transform: rotate(-1deg);
             transition: box-shadow 0.2s, transform 0.1s;
             border-radius: 2px 2px 15px 2px; word-wrap: break-word; z-index: 100;
+            /* 避免文字選取干擾拖曳 */
+            user-select: none; 
         }
         .sticky-note:active { cursor: grabbing; transform: scale(1.05); z-index: 999; }
         .sticky-tag {
@@ -142,14 +144,15 @@
             載入中...
         </div>
 
-        <div v-if="isTeacher" class="teacher-board" :style="{ backgroundImage: 'url(' + bgImage + ')' }">
+        <div v-if="isTeacher" class="teacher-board" :style="{ backgroundImage: bgImage ? 'url(' + bgImage + ')' : 'none' }">
             
             <div v-for="note in notes" 
                  :key="note.key"
                  class="sticky-note"
                  :class="getColorClass(note.key)"
-                 :style="{ left: note.x + 'px', top: note.y + 'px' }"
+                 :style="{ left: note.x + '%', top: note.y + '%' }"
                  @mousedown="startDrag($event, note)"
+                 @touchstart="startDragTouch($event, note)" 
             >
                 <div v-if="note.zoneName" class="sticky-tag">{{ note.zoneName }}</div>
                 {{ note.text }}
@@ -163,12 +166,15 @@
                 </div>
                 
                 <div style="display:flex; align-items:center; gap: 5px;">
-                    <button class="btn btn-primary" @click="showZoneModal = true">⚙️ 設定分區/提示</button>
+                    <button class="btn btn-primary" @click="showZoneModal = true">⚙️ 分區設定</button>
+                    
                     <label class="btn btn-upload">
-                        🖼️ 背景
+                        🖼️ 更換背景
                         <input type="file" accept="image/*" style="display: none;" @change="handleBgUpload">
                     </label>
-                    <button class="btn btn-danger" @click="clearBoard">🗑️ 清空</button>
+                    <button v-if="bgImage" class="btn btn-danger" @click="removeBackground" title="移除背景圖，變回白板">✕ 移除背景</button>
+                    
+                    <button class="btn btn-danger" @click="clearBoard">🗑️ 清空貼紙</button>
                     <div style="width:1px; height:25px; background:#555; margin:0 10px;"></div>
                     <button class="btn btn-icon" @click="showToolbar = false" title="隱藏控制台">▼ 收起</button>
                 </div>
@@ -256,7 +262,7 @@
                     </div>
                 </div>
 
-                <p style="color:#666; font-size:0.9rem; margin-bottom:10px; font-weight:bold;">分類落點設定：</p>
+                <p style="color:#666; font-size:0.9rem; margin-bottom:10px; font-weight:bold;">分類落點設定 (會自動轉換為畫面比例)：</p>
                 <div v-for="(z, idx) in tempZones" :key="idx" class="zone-row">
                     <input type="text" v-model="z.name" placeholder="分類名稱 (例: 知識)">
                     <select v-model="z.pos">
@@ -326,9 +332,9 @@
                     notes: [],
                     bgImage: '',
                     
-                    // 分區與提示設定
+                    // 設定
                     zones: [],
-                    promptSuffix: '的想法', // 預設提示語
+                    promptSuffix: '的想法',
                     freeText: '', 
                     
                     // UI 控制
@@ -337,11 +343,14 @@
                     editingNote: { key: '', text: '', zoneName: '' },
                     showZoneModal: false,
                     tempZones: [],
-                    tempSuffix: '', // Modal 裡的暫存值
+                    tempSuffix: '',
                     
+                    // 拖曳暫存 (使用百分比計算)
                     draggingNote: null,
-                    dragOffsetX: 0,
-                    dragOffsetY: 0,
+                    dragStartX: 0,
+                    dragStartY: 0,
+                    dragStartNoteX: 0, // %
+                    dragStartNoteY: 0, // %
                 }
             },
             computed: {
@@ -362,8 +371,11 @@
                     this.studentId = storedId;
                     document.body.style.overflow = "auto";
                 } else {
+                    // 講師端監聽滑鼠與觸控
                     window.addEventListener('mousemove', this.onDrag);
                     window.addEventListener('mouseup', this.stopDrag);
+                    window.addEventListener('touchmove', this.onTouchDrag, { passive: false });
+                    window.addEventListener('touchend', this.stopDrag);
                 }
 
                 db.ref('board/notes').on('value', snapshot => {
@@ -374,13 +386,11 @@
 
                 db.ref('board/background').on('value', s => this.bgImage = s.val() || '');
                 
-                // 監聽分區設定
                 db.ref('board/settings/zones').on('value', s => {
                     const data = s.val() || [];
                     this.zones = data.map(z => ({ ...z, draftText: '' }));
                 });
 
-                // 監聽提示語設定
                 db.ref('board/settings/promptSuffix').on('value', s => {
                     this.promptSuffix = s.val() || '的想法';
                 });
@@ -388,12 +398,13 @@
             methods: {
                 sendZoneNote(zone) {
                     if (!zone.draftText.trim()) return;
-                    const pos = this.calcPosition(zone.pos);
+                    // 取得百分比位置
+                    const pos = this.calcPercentPosition(zone.pos);
                     db.ref('board/notes').push({
                         text: zone.draftText,
                         studentId: this.studentId,
                         zoneName: zone.name,
-                        x: pos.x, y: pos.y,
+                        x: pos.x, y: pos.y, // 存入百分比
                         timestamp: Date.now()
                     });
                     zone.draftText = '';
@@ -404,60 +415,45 @@
                         text: this.freeText,
                         studentId: this.studentId,
                         zoneName: '',
-                        x: 50 + Math.random() * 200, y: 100 + Math.random() * 200,
+                        x: 10 + Math.random() * 60, y: 20 + Math.random() * 60, // 隨機百分比
                         timestamp: Date.now()
                     });
                     this.freeText = '';
                 },
-                openEditModal(note) {
-                    this.editingNote = { ...note };
-                    this.showEditModal = true;
-                },
-                confirmEdit() {
-                    const { key, text } = this.editingNote;
-                    db.ref('board/notes/' + key).update({ text });
-                    this.showEditModal = false;
-                },
-                calcPosition(posCode) {
-                    const W = 1200; const H = 800; const padding = 100;
-                    const rand = () => (Math.random() - 0.5) * 60;
-                    let x = W/2, y = H/2;
+                
+                // === 新：座標計算改為百分比 (0~100) ===
+                calcPercentPosition(posCode) {
+                    const rand = () => (Math.random() - 0.5) * 5; // 隨機偏移 5%
+                    let x = 40, y = 40; // 預設中間
+
+                    // 這裡的數值代表百分比 (例如 5 代表 5%)
                     switch(posCode) {
-                        case 'TL': x = padding; y = padding; break;
-                        case 'TR': x = W-padding-150; y = padding; break;
-                        case 'BL': x = padding; y = H-padding-100; break;
-                        case 'BR': x = W-padding-150; y = H-padding-100; break;
-                        case 'T':  x = W/2; y = padding; break;
-                        case 'B':  x = W/2; y = H-padding-100; break;
-                        case 'L':  x = padding; y = H/2; break;
-                        case 'R':  x = W-padding-150; y = H/2; break;
-                        case 'C':  x = W/2; y = H/2; break;
+                        case 'TL': x = 5;  y = 5; break;   // 左上
+                        case 'T':  x = 40; y = 5; break;   // 上方
+                        case 'TR': x = 75; y = 5; break;   // 右上
+                        case 'L':  x = 5;  y = 40; break;  // 左側
+                        case 'C':  x = 40; y = 40; break;  // 中間
+                        case 'R':  x = 75; y = 40; break;  // 右側
+                        case 'BL': x = 5;  y = 75; break;  // 左下
+                        case 'B':  x = 40; y = 75; break;  // 下方
+                        case 'BR': x = 75; y = 75; break;  // 右下
                     }
                     return { x: x + rand(), y: y + rand() };
                 },
-                getLocationLabel(code) {
-                    const map = {
-                        'TL': '↖ 左上', 'T': '↑ 上方', 'TR': '↗ 右上',
-                        'L': '← 左側', 'C': '● 中間', 'R': '→ 右側',
-                        'BL': '↙ 左下', 'B': '↓ 下方', 'BR': '↘ 右下'
-                    };
-                    return map[code] || '';
-                },
 
-                // 講師設定相關
+                // 講師功能
                 addTempZone() { this.tempZones.push({ name: '', pos: 'C' }); },
                 removeTempZone(idx) { this.tempZones.splice(idx, 1); },
                 saveZones() {
                     const finalZones = this.tempZones.filter(z => z.name.trim() !== '');
-                    
-                    // 同時儲存分區和提示語
                     db.ref('board/settings').update({
                         zones: finalZones,
                         promptSuffix: this.tempSuffix || '的想法'
                     });
-                    
                     this.showZoneModal = false;
                 },
+                
+                // 背景圖處理
                 handleBgUpload(event) {
                     const file = event.target.files[0];
                     if (!file) return;
@@ -466,19 +462,50 @@
                     reader.onload = (e) => db.ref('board/background').set(e.target.result);
                     reader.readAsDataURL(file);
                 },
-                startDrag(e, note) {
-                    if (!this.isTeacher) return;
-                    this.draggingNote = note;
-                    this.dragOffsetX = e.clientX - note.x;
-                    this.dragOffsetY = e.clientY - note.y;
-                },
-                onDrag(e) {
-                    if (this.draggingNote) {
-                        e.preventDefault();
-                        this.draggingNote.x = e.clientX - this.dragOffsetX;
-                        this.draggingNote.y = e.clientY - this.dragOffsetY;
+                removeBackground() {
+                    if(confirm('確定要移除背景圖嗎？便利貼位置將保留。')) {
+                        db.ref('board/background').remove();
                     }
                 },
+
+                // === 新：拖曳邏輯 (像素轉百分比) ===
+                startDrag(e, note) { this.initDrag(e.clientX, e.clientY, note); },
+                startDragTouch(e, note) { this.initDrag(e.touches[0].clientX, e.touches[0].clientY, note); },
+                
+                initDrag(clientX, clientY, note) {
+                    if (!this.isTeacher) return;
+                    this.draggingNote = note;
+                    this.dragStartX = clientX;
+                    this.dragStartY = clientY;
+                    this.dragStartNoteX = note.x; // 初始 %
+                    this.dragStartNoteY = note.y; // 初始 %
+                },
+                
+                onDrag(e) { this.processDrag(e.clientX, e.clientY); },
+                onTouchDrag(e) { 
+                    e.preventDefault(); // 防止滑動畫面
+                    this.processDrag(e.touches[0].clientX, e.touches[0].clientY); 
+                },
+
+                processDrag(clientX, clientY) {
+                    if (this.draggingNote) {
+                        const winW = window.innerWidth;
+                        const winH = window.innerHeight;
+                        
+                        // 計算移動的像素距離
+                        const dxPx = clientX - this.dragStartX;
+                        const dyPx = clientY - this.dragStartY;
+
+                        // 將像素距離換算成百分比
+                        const dxPercent = (dxPx / winW) * 100;
+                        const dyPercent = (dyPx / winH) * 100;
+
+                        // 更新暫存位置
+                        this.draggingNote.x = this.dragStartNoteX + dxPercent;
+                        this.draggingNote.y = this.dragStartNoteY + dyPercent;
+                    }
+                },
+
                 stopDrag() {
                     if (this.draggingNote) {
                         const { key, x, y } = this.draggingNote;
@@ -486,15 +513,26 @@
                         this.draggingNote = null;
                     }
                 },
+
+                // 其他
                 deleteNote(key) { if(confirm('確定刪除？')) db.ref(`board/notes/${key}`).remove(); },
-                clearBoard() { if(confirm('確定清空？')) db.ref('board/notes').remove(); },
+                clearBoard() { if(confirm('確定清空？此操作不可復原。')) db.ref('board/notes').remove(); },
                 getColorClass(key) { return `color-${(key.charCodeAt(key.length-1)%4)+1}`; },
+                openEditModal(note) { this.editingNote = { ...note }; this.showEditModal = true; },
+                confirmEdit() {
+                    const { key, text } = this.editingNote;
+                    db.ref('board/notes/' + key).update({ text });
+                    this.showEditModal = false;
+                },
+                getLocationLabel(code) {
+                    const map = { 'TL': '↖ 左上', 'T': '↑ 上方', 'TR': '↗ 右上', 'L': '← 左側', 'C': '● 中間', 'R': '→ 右側', 'BL': '↙ 左下', 'B': '↓ 下方', 'BR': '↘ 右下' };
+                    return map[code] || '';
+                }
             },
             watch: {
                 showZoneModal(val) { 
                     if (val) {
                         this.tempZones = JSON.parse(JSON.stringify(this.zones));
-                        // 開啟視窗時，把目前的提示語帶入輸入框
                         this.tempSuffix = this.promptSuffix;
                     }
                 }
