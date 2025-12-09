@@ -36,8 +36,9 @@
             box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 20px;
             border-left: 6px solid #1976d2; 
         }
-        .zone-card h3 { margin: 0 0 10px 0; color: #333; display: flex; justify-content: space-between; align-items: center; }
-        .zone-hint { font-size: 0.85rem; color: #888; font-weight: normal; }
+        /* 修改：學員標題不再需要 flex (因為沒有右邊的提示文字了) */
+        .zone-card h3 { margin: 0 0 10px 0; color: #333; font-weight: bold; font-size: 1.2rem; }
+        
         .input-row { display: flex; gap: 10px; }
         .input-row input { flex: 1; }
         .zone-card:nth-child(4n+1) { border-left-color: #fbc02d; }
@@ -56,30 +57,28 @@
             margin-bottom: 4px; font-weight: bold; margin-right: 5px;
         }
 
-        /* --- 講師端樣式 (新架構：畫布縮放) --- */
+        /* --- 講師端樣式 (畫布縮放) --- */
         .teacher-viewport {
             width: 100vw; height: 100vh; 
-            overflow: hidden; /* 隱藏捲軸，改用 transform 移動 */
-            background-color: #333; /* 視窗外的顏色 */
+            overflow: hidden;
+            background-color: #333;
             position: relative;
-            cursor: grab; /* 預設手型，表示可拖曳畫布 */
+            cursor: grab;
         }
         .teacher-viewport:active { cursor: grabbing; }
 
-        /* 這是真正的「紙」，所有東西都在這上面 */
         .canvas-layer {
             position: absolute;
-            transform-origin: 0 0; /* 縮放原點設為左上角 */
-            background-color: #e0e0e0; /* 沒圖時的白板顏色 */
-            box-shadow: 0 0 50px rgba(0,0,0,0.5); /* 讓畫布有點立體感 */
-            transition: transform 0.05s linear; /* 讓拖曳縮放稍微平滑一點點 */
+            transform-origin: 0 0;
+            background-color: #e0e0e0;
+            box-shadow: 0 0 50px rgba(0,0,0,0.5);
+            transition: transform 0.05s linear;
         }
 
-        /* 背景圖 */
         .bg-img {
             width: 100%; height: 100%;
-            object-fit: contain; /* 確保圖片不變形 */
-            pointer-events: none; /* 讓滑鼠可以直接點穿圖片去拖曳畫布 */
+            object-fit: contain;
+            pointer-events: none;
             display: block;
         }
 
@@ -120,9 +119,8 @@
             transform: rotate(-1deg);
             border-radius: 2px 2px 15px 2px; word-wrap: break-word; z-index: 100;
             user-select: none; 
-            cursor: move; /* 便利貼上顯示移動游標 */
+            cursor: move;
         }
-        /* 避免與畫布拖曳衝突，需要停止冒泡 */
         .sticky-note:active { transform: scale(1.05); z-index: 999; cursor: grabbing; }
 
         .sticky-tag {
@@ -168,7 +166,6 @@
              @wheel.prevent="handleZoom">
             
             <div class="canvas-layer" :style="canvasStyle">
-                
                 <img v-if="bgImage" :src="bgImage" class="bg-img" @load="onImgLoad">
                 <div v-else style="width: 100%; height: 100%;"></div>
 
@@ -214,7 +211,7 @@
                 </h2>
                 <div v-if="zones.length > 0">
                     <div v-for="(z, idx) in zones" :key="idx" class="zone-card">
-                        <h3>{{ z.name }} <span class="zone-hint">({{ getLocationLabel(z.pos) }})</span></h3>
+                        <h3>{{ z.name }}</h3>
                         <div class="input-row">
                             <input type="text" v-model="z.draftText" :placeholder="'請輸入關於「' + z.name + '」' + (promptSuffix || '的想法') + '...'" @keydown.enter="sendZoneNote(z)">
                             <button class="btn btn-primary" @click="sendZoneNote(z)">送出</button>
@@ -315,24 +312,14 @@
                     tempZones: [],
                     tempSuffix: '',
 
-                    // === 畫布系統變數 ===
-                    // 預設畫布大小 (無圖時用)
                     canvasW: 1280, 
                     canvasH: 720,
-                    // 視窗變換 (Transform)
                     scale: 1,
                     panning: false,
-                    pointX: 0, 
-                    pointY: 0,
-                    startX: 0, 
-                    startY: 0,
-
-                    // 拖曳便利貼變數
+                    pointX: 0, pointY: 0, startX: 0, startY: 0,
                     draggingNote: null,
-                    noteDragStartX: 0, // 初始滑鼠 X
-                    noteDragStartY: 0, // 初始滑鼠 Y
-                    noteInitialPercentX: 0, 
-                    noteInitialPercentY: 0,
+                    noteDragStartX: 0, noteDragStartY: 0,
+                    noteInitialPercentX: 0, noteInitialPercentY: 0,
                 }
             },
             computed: {
@@ -357,8 +344,6 @@
                     }
                     this.studentId = storedId;
                     document.body.style.overflow = "auto";
-                } else {
-                    // 講師端不需要 overflow (由 transform 處理)
                 }
 
                 db.ref('board/notes').on('value', snapshot => {
@@ -370,11 +355,8 @@
                 db.ref('board/background').on('value', s => {
                     this.bgImage = s.val() || '';
                     if (!this.bgImage) {
-                        // 沒圖時，重設為預設大小
-                        this.canvasW = 1280;
-                        this.canvasH = 720;
+                        this.canvasW = 1280; this.canvasH = 720;
                     }
-                    // 有圖時由 onImgLoad 處理大小
                 });
                 
                 db.ref('board/settings').on('value', s => {
@@ -383,16 +365,13 @@
                     this.promptSuffix = val.promptSuffix || '的想法';
                 });
                 
-                // 預設置中
                 this.resetView();
             },
             methods: {
-                // === 畫布操作邏輯 (Pan & Zoom) ===
                 onImgLoad(e) {
-                    // 圖片載入後，將畫布大小設為圖片原始大小
                     this.canvasW = e.target.naturalWidth;
                     this.canvasH = e.target.naturalHeight;
-                    this.resetView(); // 載入新圖後自動置中
+                    this.resetView();
                 },
                 startPan(e) {
                     this.panning = true;
@@ -415,21 +394,8 @@
                 handleZoom(e) {
                     const zoomSensitivity = 0.001;
                     const delta = -e.deltaY * zoomSensitivity;
-                    const newScale = Math.min(Math.max(0.1, this.scale + delta), 5); // 限制縮放 0.1x ~ 5x
+                    const newScale = Math.min(Math.max(0.1, this.scale + delta), 5);
                     
-                    // 滑鼠為中心縮放算法
-                    // 1. 取得滑鼠在畫布內的相對位置 (還沒縮放前)
-                    const mouseX = e.clientX - this.pointX;
-                    const mouseY = e.clientY - this.pointY;
-
-                    // 2. 計算新的位移量，讓滑鼠底下的點保持不動
-                    // 公式：新的偏移 = 滑鼠位置 - (滑鼠在舊縮放下的相對值 * 新縮放率)
-                    // 但這裡簡化處理：直接調整 pointX/Y 來補償
-                    // 實際上簡單做法：
-                    // this.pointX -= mouseX / this.scale * (newScale - this.scale);
-                    // this.pointY -= mouseY / this.scale * (newScale - this.scale);
-                    
-                    // 這裡使用更直覺的中心縮放
                     const ratio = 1 - newScale / this.scale;
                     this.pointX += (e.clientX - this.pointX) * ratio;
                     this.pointY += (e.clientY - this.pointY) * ratio;
@@ -437,45 +403,30 @@
                     this.scale = newScale;
                 },
                 resetView() {
-                    // 自動計算最適合的縮放比例 (Contain)
                     const winW = window.innerWidth;
                     const winH = window.innerHeight;
                     const scaleW = winW / this.canvasW;
                     const scaleH = winH / this.canvasH;
-                    
-                    // 留一點邊距 (0.9)
                     this.scale = Math.min(scaleW, scaleH) * 0.9;
-                    
-                    // 置中
                     this.pointX = (winW - this.canvasW * this.scale) / 2;
                     this.pointY = (winH - this.canvasH * this.scale) / 2;
                 },
-
-                // === 便利貼拖曳 (邏輯修正) ===
                 startDragNote(e, note) {
                     this.draggingNote = note;
                     this.noteDragStartX = e.clientX;
                     this.noteDragStartY = e.clientY;
                     this.noteInitialPercentX = note.x;
                     this.noteInitialPercentY = note.y;
-                    
                     window.addEventListener('mousemove', this.onNoteDrag);
                     window.addEventListener('mouseup', this.stopNoteDrag);
                 },
                 onNoteDrag(e) {
                     if (!this.draggingNote) return;
                     e.preventDefault();
-                    
-                    // 1. 計算滑鼠移動的像素距離
                     const dxPx = e.clientX - this.noteDragStartX;
                     const dyPx = e.clientY - this.noteDragStartY;
-                    
-                    // 2. 關鍵：將像素距離轉為畫布百分比
-                    // 移動距離 / (畫布當前渲染寬度) * 100
-                    // 畫布渲染寬度 = 原始寬度 * 縮放率
                     const dxPercent = (dxPx / (this.canvasW * this.scale)) * 100;
                     const dyPercent = (dyPx / (this.canvasH * this.scale)) * 100;
-
                     this.draggingNote.x = this.noteInitialPercentX + dxPercent;
                     this.draggingNote.y = this.noteInitialPercentY + dyPercent;
                 },
@@ -488,8 +439,6 @@
                         window.removeEventListener('mouseup', this.stopNoteDrag);
                     }
                 },
-
-                // === 以下保持原邏輯 ===
                 sendZoneNote(zone) {
                     if (!zone.draftText.trim()) return;
                     const pos = this.calcPercentPosition(zone.pos);
@@ -516,10 +465,6 @@
                         case 'BL': x = 5;  y = 75; break;  case 'B':  x = 40; y = 75; break;  case 'BR': x = 75; y = 75; break;
                     }
                     return { x: x + rand(), y: y + rand() };
-                },
-                getLocationLabel(code) {
-                    const map = { 'TL': '↖ 左上', 'T': '↑ 上方', 'TR': '↗ 右上', 'L': '← 左側', 'C': '● 中間', 'R': '→ 右側', 'BL': '↙ 左下', 'B': '↓ 下方', 'BR': '↘ 右下' };
-                    return map[code] || '';
                 },
                 addTempZone() { this.tempZones.push({ name: '', pos: 'C' }); },
                 removeTempZone(idx) { this.tempZones.splice(idx, 1); },
