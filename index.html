@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>結構化互動白板 (畫布縮放版)</title>
+    <title>結構化互動白板 (自動適應高度版)</title>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
@@ -36,7 +36,7 @@
             box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 20px;
             border-left: 6px solid #1976d2; 
         }
-        /* 修改：學員標題不再需要 flex (因為沒有右邊的提示文字了) */
+        /* 學員標題無提示 */
         .zone-card h3 { margin: 0 0 10px 0; color: #333; font-weight: bold; font-size: 1.2rem; }
         
         .input-row { display: flex; gap: 10px; }
@@ -110,14 +110,21 @@
             to { transform: translateY(0); opacity: 1; }
         }
 
-        /* 便利貼樣式 */
+        /* === 重點修改：便利貼樣式 === */
         .sticky-note {
-            position: absolute; width: 180px; min-height: 100px;
-            background: #ffeb3b; padding: 15px;
+            position: absolute; 
+            width: 180px; 
+            height: auto; /* 修改：讓高度自動適應 */
+            /* min-height: 100px;  <-- 已移除此行，避免強制留白 */
+            background: #ffeb3b; 
+            padding: 15px;
             box-shadow: 2px 5px 15px rgba(0,0,0,0.3);
-            font-size: 1.1rem; line-height: 1.4;
+            font-size: 1.1rem; 
+            line-height: 1.4;
             transform: rotate(-1deg);
-            border-radius: 2px 2px 15px 2px; word-wrap: break-word; z-index: 100;
+            border-radius: 2px 2px 15px 2px; 
+            word-wrap: break-word; 
+            z-index: 100;
             user-select: none; 
             cursor: move;
         }
